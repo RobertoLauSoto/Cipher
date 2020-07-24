@@ -6,11 +6,11 @@ open System.Xml
 open FSharp.Data
 
 let inline (<==) a b = 
-    (a:>XmlNode).AppendChild b |> ignore
+    (a :> XmlNode).AppendChild b |> ignore
     a
 
-let inline (<--) a (att, v) =
-    (a :> XmlElement).SetAttribute(att, v) |> ignore
+let inline (<--) a b =
+    (a :> XmlElement).SetAttributeNode b |> ignore
     a
 
 let url  = "http://localhost:8212"
@@ -64,26 +64,61 @@ let dimensionElem   = createAlea "Dimension"
 let descriptionElem = createAlea "Description"
 let elementsElem    = createAlea "Elements"
 
-// let requestId id = 
-//     let att = doc.CreateAttribute "RequestID"
-//     att.Value <- id
-//     att
+let requestId id = 
+    let idAtt = doc.CreateAttribute "RequestID"
+    idAtt.Value <- id
+    idAtt
 
-requestElem   <-- ("RequestID", "001"  )
-requestElem   <-- ("Class", "Dimension")
-requestElem   <-- ("Method", "Create"  )
+let requestClass cls =
+    let classAtt = doc.CreateAttribute "Class"
+    classAtt.Value <- cls
+    classAtt
 
-dimensionElem <-- ("Name", "prueba3"   )
-dimensionElem <-- ("FirstBatch", "true")
-dimensionElem <-- ("LastBatch", "true" )
+let requestMethod mtd =
+    let methodAtt = doc.CreateAttribute "Method"
+    methodAtt.Value <- mtd
+    methodAtt
+
+let dimName name =
+    let nameAtt = doc.CreateAttribute "Name"
+    nameAtt.Value <- name
+    nameAtt
+
+let dimFirstBatch fb =
+    let fbAtt = doc.CreateAttribute "FirstBatch"
+    fbAtt.Value <- fb
+    fbAtt
+
+let dimLastBatch lb =
+    let lbAtt = doc.CreateAttribute "LastBatch"
+    lbAtt.Value <- lb
+    lbAtt
+
+requestElem   <-- requestId "001"
+requestElem   <-- requestClass "Dimension"
+requestElem   <-- requestMethod "Create"
+
+dimensionElem <-- dimName "prueba"
+dimensionElem <-- dimFirstBatch "true"
+dimensionElem <-- dimLastBatch "true"
 
 let descriptionText text = descriptionElem <== doc.CreateTextNode text
 
-descriptionText "prueba3"
+descriptionText "prueba"
 
-let insertElement element = elementsElem <== doc.CreateTextNode element
+let insertElement elementType elementName = 
+    let element = elementType + "\t" + elementName + "\n"
+    elementsElem <== doc.CreateTextNode element
 
-insertElement "N\tMyElement1"
+let MyElement1 = insertElement "N" "MyElement1"
+let MyElement2 = insertElement "N" "MyElement2"
+let MyElement3 = insertElement "S" "MyElement3"
+
+let insertElementWithChild elementParentType elementParentName elementChildName =
+    let element = elementParentType + "\t" + elementParentName + "\n" + "\t" + elementChildName + "\t-1"
+    elementsElem <== doc.CreateTextNode element
+
+let MyElement4 = insertElementWithChild "N" "MyElement4" "MyElement5"
 
 let dimensionCreate =
     createAlea "Document"
@@ -93,7 +128,7 @@ let dimensionCreate =
             <==(elementsElem)))
 
 let dimCreateRequest =
-    let hdr = createXMLA "BeginSession"
+    let hdr = createXMLA "Header"
     let bdy = 
         createXMLA "Command"
         <== dimensionCreate
