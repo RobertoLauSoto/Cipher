@@ -95,35 +95,18 @@ module Prueba =
         <-- dimName       dim
         <-- dimFirstBatch "true"
         <-- dimLastBatch  "true"
-    let descriptionElem = createAlea "Description"
-    let elementsElem    = createAlea "Elements"
 
-    let descriptionText text = descriptionElem <== doc.CreateTextNode text
+    let descriptionCreate desc =
+        createAlea "Description"
+        <== doc.CreateTextNode desc
 
-    descriptionText "prueba"
+    let concatElements elementsList =
+        elementsList
+        |> String.concat "\n"
 
-    let insertElement elementType elementName = 
-        let element = elementType + "\t" + elementName + "\n"
-        elementsElem <== doc.CreateTextNode element
-
-    let MyElement1 = insertElement "N" "MyElement1"
-    let MyElement2 = insertElement "N" "MyElement2"
-    let MyElement3 = insertElement "S" "MyElement3"
-
-
-    [
-        "texto1" 
-        "texto2"
-        "texto3"
-    ]
-    |> String.concat "\n"
-    |> print
-
-    let insertElementWithChild elementParentType elementParentName elementChildName =
-        let element = elementParentType + "\t" + elementParentName + "\n" + "\t" + elementChildName + "\t-1"
-        elementsElem <== doc.CreateTextNode element
-
-    let MyElement4 = insertElementWithChild "C" "MyElement4" "MyElement5"
+    let elementsCreate elementsList = 
+        createAlea "Elements"
+        <== doc.CreateTextNode (concatElements elementsList)
 
     let aleaRequest = 
         let mutable rid = 1
@@ -134,18 +117,17 @@ module Prueba =
             <-- requestClass  cls
             <-- requestMethod mtd
 
-    let dimensionCreate dim =
+    let dimensionCreate dim desc elementsList =
         createAlea "Document" 
         <==(aleaRequest "Dimension" "Create"
             <==(dimensionName dim
-                <==(descriptionElem)
-                <==(elementsElem)))
+                <==(descriptionCreate desc)
+                <==(elementsCreate elementsList)))
 
     let dimensionDelete dim =
         createAlea "Document"
             <==(aleaRequest "Dimension" "Delete"
                 <== dimensionName dim)
-
 
     type ErrorRequest = 
         | HttpError     of string
@@ -180,7 +162,7 @@ module Prueba =
             |> Result.sequenceSeq)
 
     [ execute (dimensionDelete "prueba") 
-      execute (dimensionCreate "prueba")
+      execute (dimensionCreate "prueba" "prueba description" ["N\tMyElement1"; "N\tMyElement2"; "S\tMyElement3"; "C\tMyElement4\n\tMyElement5"])
       ]
     |> session 
     |> printfn "%A"
