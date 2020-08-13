@@ -39,6 +39,49 @@ module Prueba =
     let createXMLA     elem = doc.CreateElement("xmla", elem,     XMLAUri)
     let createAlea     elem = doc.CreateElement("Alea", elem,     AleaUri)
 
+    type Server    = Server    of string
+    type Dimension = Dimension of string
+    type Cube      = Cube      of string
+    type Element   = Element   of string with member this.Id = match this with Element id -> id
+    [< RequireQualifiedAccess >]
+    type ElemType  = String | Numeric | Consolidated
+    type Relation  = {
+        parent : Element
+        child  : Element
+        weight : float
+    }
+    type TableId   = TableId1 | TableId2 | TableId3
+    [< RequireQualifiedAccess >]
+    type FieldType = String | Numeric | Date | Logical
+    type Field     = {
+        fldName        : string
+        fldTable       : TableId
+        fldDescription : string
+        fldType        : FieldType
+        fldLength      : int
+        fldDecimals    : int
+    }
+    type Handle    = Handle    of int
+
+    let TableIdDecl =
+        function 
+        | TableId1 -> "1"
+        | TableId2 -> "2"
+        | TableId3 -> "3"
+
+    let ElemTypeDecl =
+        function 
+        | ElemType.String       -> "S"
+        | ElemType.Numeric      -> "N"
+        | ElemType.Consolidated -> "C"
+
+    let FieldTypeDecl =
+        function 
+        | FieldType.String  -> "C"
+        | FieldType.Numeric -> "N"
+        | FieldType.Date    -> "D"
+        | FieldType.Logical -> "L"
+
     let createAttribute att v =
         let idAtt = doc.CreateAttribute att
         idAtt.Value <- v
@@ -75,38 +118,29 @@ module Prueba =
         |> execute 
         |> envelope [ createXMLA "BeginSession" ; security "Admin" "" ]
 
-    let sessionId     = createAttribute "SessionID"
-    let requestId     = createAttribute "RequestID"
-    let requestClass  = createAttribute "Class"
-    let requestMethod = createAttribute "Method"
-    let dimName       = createAttribute "Name"
-    let dimFirstBatch = createAttribute "FirstBatch"
-    let dimLastBatch  = createAttribute "LastBatch"
+    let sessionId          = createAttribute "SessionID"
+    let requestId          = createAttribute "RequestID"
+    let requestClass       = createAttribute "Class"
+    let requestMethod      = createAttribute "Method"
+    let dimName            = createAttribute "Name"
+    let dimFirstBatch      = createAttribute "FirstBatch"
+    let dimLastBatch       = createAttribute "LastBatch"
+    let dimWithHierarchies = createAttribute "WithHierarchies"
+    let attributeName      = createAttribute "Name"
+    let attributeDesc      = createAttribute "Description"
+    let attributeWidth   : int -> _ = string        >> createAttribute "Width"
+    let attributeDecimal : int -> _ = string        >> createAttribute "Decimal"
+    let attributeId                 = TableIdDecl   >> createAttribute "ID"
+    let attributeType               = FieldTypeDecl >> createAttribute "Type"
+
+
 
     let createSession sid = createXMLA "Session" <-- sessionId sid
 
     let endSession sid =
         createXMLA "Statement"
         |> execute 
-        |> envelope [ createXMLA "EndSession" ; sid ]        
-
-    let dimensionName dim  = 
-        createAlea "Dimension"
-        <-- dimName       dim
-        <-- dimFirstBatch "true"
-        <-- dimLastBatch  "true"
-
-    let descriptionCreate desc =
-        createAlea "Description"
-        <== doc.CreateTextNode desc
-
-    let concatElements elementsList =
-        elementsList
-        |> String.concat "\n"
-
-    let elementsCreate elementsList = 
-        createAlea "Elements"
-        <== doc.CreateTextNode (concatElements elementsList)
+        |> envelope [ createXMLA "EndSession" ; sid ]
 
     let aleaRequest = 
         let mutable rid = 1
@@ -117,17 +151,91 @@ module Prueba =
             <-- requestClass  cls
             <-- requestMethod mtd
 
-    let dimensionCreate dim desc elementsList =
+    let dimensionName (Dimension dim)  = 
+        createAlea "Dimension"
+        <-- dimName       dim
+        <-- dimFirstBatch "true"
+        <-- dimLastBatch  "true"
+
+    let dimensionNameWithHierarchies (Dimension dim) =
+        createAlea "Dimension"
+        <-- dimName            dim
+        <-- dimWithHierarchies "true"
+
+
+    let descriptionCreate desc =
+        createAlea "Description"
+        <== doc.CreateTextNode desc
+
+    let concatElements (elementsList : seq<Element * ElemType>) =
+        elementsList
+        |> Seq.map (fun (Element elm, elmType) -> ElemTypeDecl elmType + "\t" + elm)
+        |> String.concat "\n"
+
+    let concatRelations (relationsList : seq<Relation>) =
+        relationsList
+        |> Seq.groupBy (fun rel -> rel.parent)
+        |> Seq.map (fun (prn, rels) -> 
+            rels
+            |> Seq.map (fun rel -> sprintf "\t%s\t%g" rel.child.Id rel.weight)
+            |> String.concat "\n"
+            |> sprintf "C\t%s\n%s\n" prn.Id
+        )
+        |> String.concat "\n"
+        
+
+    let elementsCreate (elementsList : seq<Element * ElemType>) (relationsList : seq<Relation>) = 
+        createAlea "Elements"
+        <== doc.CreateTextNode (concatElements elementsList + "\n" + concatRelations relationsList) 
+
+    let dimensionCreate (dim : Dimension) desc (elementsList : seq<Element * ElemType>) (relationsList : seq<Relation>) =
         createAlea "Document" 
         <==(aleaRequest "Dimension" "Create"
             <==(dimensionName dim
                 <==(descriptionCreate desc)
-                <==(elementsCreate elementsList)))
+                <==(elementsCreate elementsList relationsList)))
 
     let dimensionDelete dim =
         createAlea "Document"
             <==(aleaRequest "Dimension" "Delete"
                 <== dimensionName dim)
+    
+    let dimAttributeCreate (att : Field) =
+        createAlea "Attribute"
+        <-- attributeName    att.fldName
+        <-- attributeType    att.fldType
+        <-- attributeDesc    att.fldDescription
+        <-- attributeWidth   att.fldLength
+        <-- attributeDecimal att.fldDecimals
+
+    let attributeTableCreateMethod id atts =
+        let tbl = createAlea "AttributeTable"                
+                  <-- attributeId id
+        for att in atts do
+            if att.fldTable = id then
+                tbl <== dimAttributeCreate att
+                |> ignore
+        tbl
+
+    let dimensionCreateAttributeTable dim id atts =
+        createAlea "Document"
+        <==(aleaRequest "Dimension" "CreateAttributeTable"
+            <==(dimensionName dim
+                <==(attributeTableCreateMethod id atts)))
+
+    let dimensionDeleteAttributeTable dim id =
+        createAlea "Document"
+        <==(aleaRequest "Dimension" "DeleteAttributeTable"
+            <==(dimensionName dim
+                <==(createAlea "AttributeTable"
+                    <-- attributeId id)))
+
+    // let dimensionImportAttributeValues dim id (elementsList : seq<Element * seq<Field * string>>) =
+    //     let tbl = createAlea "AttributeTable"
+    //     createAlea "Document"
+    //         <==(aleaRequest "Dimension" "ImportAttributeValues"
+    //             <==(dimensionNameWithHierarchies dim
+    //             ))
 
     type ErrorRequest = 
         | HttpError     of string
@@ -161,8 +269,108 @@ module Prueba =
             |> Seq.toArray
             |> Result.sequenceSeq)
 
-    [ execute (dimensionDelete "prueba") 
-      execute (dimensionCreate "prueba" "prueba description" ["N\tMyElement1"; "N\tMyElement2"; "S\tMyElement3"; "C\tMyElement4\n\tMyElement5"])
+    // [ execute (dimensionDelete "prueba") 
+    //   execute (dimensionCreate "prueba" "prueba description" ["N\tMyElement1"; "N\tMyElement2"; "S\tMyElement3"; "C\tMyElement4\n\tMyElement5"])
+    //   ]
+    // |> session 
+    // |> printfn "%A"
+
+    let prueba2 = Dimension "prueba2"
+    let elements = [ 
+                     Element "MyElement1" , ElemType.String
+                     Element "MyElement2" , ElemType.Numeric
+                     Element "MyElement3" , ElemType.Consolidated
+                    ]
+    let relations = [
+        {
+            parent = Element "MyElement3"
+            child  = Element "MyElement2"
+            weight = 1.0
+        }               
+    ]
+    let attributes = [
+        {
+            fldName        = "Attribute11"
+            fldType        = FieldType.String
+            fldDescription = "Attribute11"
+            fldLength      = 10
+            fldDecimals    = 0
+            fldTable       = TableId1
+        }
+        {
+            fldName        = "Attribute12"
+            fldType        = FieldType.Numeric
+            fldDescription = "Attribute12"
+            fldLength      = 10
+            fldDecimals    = 0
+            fldTable       = TableId1
+        }
+        {
+            fldName        = "Attribute13"
+            fldType        = FieldType.Logical
+            fldDescription = "Attribute13"
+            fldLength      = 10
+            fldDecimals    = 0
+            fldTable       = TableId1
+        }        
+
+        {
+            fldName        = "Attribute21"
+            fldType        = FieldType.String
+            fldDescription = "Attribute21"
+            fldLength      = 10
+            fldDecimals    = 0
+            fldTable       = TableId2
+        }
+        {
+            fldName        = "Attribute22"
+            fldType        = FieldType.Numeric
+            fldDescription = "Attribute22"
+            fldLength      = 10
+            fldDecimals    = 0
+            fldTable       = TableId2
+        }
+        {
+            fldName        = "Attribute23"
+            fldType        = FieldType.Logical
+            fldDescription = "Attribute23"
+            fldLength      = 10
+            fldDecimals    = 0
+            fldTable       = TableId2
+        }
+        {
+            fldName        = "Attribute31"
+            fldType        = FieldType.String
+            fldDescription = "Attribute31"
+            fldLength      = 10
+            fldDecimals    = 0
+            fldTable       = TableId3
+        }
+        {
+            fldName        = "Attribute32"
+            fldType        = FieldType.Numeric
+            fldDescription = "Attribute32"
+            fldLength      = 10
+            fldDecimals    = 0
+            fldTable       = TableId3
+        }
+        {
+            fldName        = "Attribute33"
+            fldType        = FieldType.Logical
+            fldDescription = "Attribute33"
+            fldLength      = 10
+            fldDecimals    = 0
+            fldTable       = TableId3
+        }
+    ]
+
+    [ execute (dimensionDelete prueba2)
+      execute (dimensionCreate prueba2 "prueba2 description" elements relations )
+      execute (dimensionCreateAttributeTable prueba2 TableId1 attributes )
+      execute (dimensionCreateAttributeTable prueba2 TableId2 attributes )
+      execute (dimensionCreateAttributeTable prueba2 TableId3 attributes )
+    //   execute (dimensionDeleteAttributeTable prueba2 TableId3 )
       ]
     |> session 
     |> printfn "%A"
+
