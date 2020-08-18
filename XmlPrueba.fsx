@@ -62,6 +62,11 @@ module Prueba =
         fldDecimals    : int
     }
     type Handle    = Handle    of int
+    type Column    = Column    of string
+    type Hierarchy = Hierarchy of string
+    type Logical   = Logical   of string
+    [<RequireQualifiedAccess>]
+    type LogicalType = True | False
 
     let TableIdDecl =
         function 
@@ -81,6 +86,11 @@ module Prueba =
         | FieldType.Numeric -> "N"
         | FieldType.Date    -> "D"
         | FieldType.Logical -> "L"
+
+    let LogicalTypeDecl =
+        function
+        | LogicalType.True  -> "T"
+        | LogicalType.False -> "F"
 
     let createAttribute att v =
         let idAtt = doc.CreateAttribute att
@@ -132,6 +142,7 @@ module Prueba =
     let attributeDecimal : int -> _ = string        >> createAttribute "Decimal"
     let attributeId                 = TableIdDecl   >> createAttribute "ID"
     let attributeType               = FieldTypeDecl >> createAttribute "Type"
+    let columnName         = createAttribute "Name"
 
 
 
@@ -162,7 +173,6 @@ module Prueba =
         <-- dimName            dim
         <-- dimWithHierarchies "true"
 
-
     let descriptionCreate desc =
         createAlea "Description"
         <== doc.CreateTextNode desc
@@ -182,11 +192,15 @@ module Prueba =
             |> sprintf "C\t%s\n%s\n" prn.Id
         )
         |> String.concat "\n"
-        
+
+    let concatValues defaultHierarchyName valuesList =
+        valuesList
+        |> Seq.map (fun (elementName, value1, value2, value3) -> defaultHierarchyName + "\t" + elementName + "\t" + value1.ToString() + "\t" + value2.ToString() + "\t" + value3.ToString())
+        |> String.concat "\n"
 
     let elementsCreate (elementsList : seq<Element * ElemType>) (relationsList : seq<Relation>) = 
         createAlea "Elements"
-        <== doc.CreateTextNode (concatElements elementsList + "\n" + concatRelations relationsList) 
+        <== doc.CreateTextNode (concatElements elementsList + "\n" + concatRelations relationsList)
 
     let dimensionCreate (dim : Dimension) desc (elementsList : seq<Element * ElemType>) (relationsList : seq<Relation>) =
         createAlea "Document" 
@@ -208,6 +222,16 @@ module Prueba =
         <-- attributeWidth   att.fldLength
         <-- attributeDecimal att.fldDecimals
 
+    let dimColumnCreate col =
+        createAlea "Column"
+        <-- columnName col
+
+    let attributeValuesCreate dim values =
+        let dimName = dim.ToString()
+        let defaultHierarchyName = dimName.[11..dimName.Length-2]
+        createAlea "Values" 
+        <== doc.CreateTextNode (concatValues defaultHierarchyName values)
+
     let attributeTableCreateMethod id atts =
         let tbl = createAlea "AttributeTable"                
                   <-- attributeId id
@@ -216,6 +240,16 @@ module Prueba =
                 tbl <== dimAttributeCreate att
                 |> ignore
         tbl
+
+    let importAttributeValuesMethod dim id atts values =
+        let tbl = createAlea "AttributeTable"
+                  <-- attributeId id
+        for att in atts do
+            if att.fldTable = id then
+                tbl <== dimColumnCreate att.fldName
+                |> ignore
+        tbl <== attributeValuesCreate dim values
+
 
     let dimensionCreateAttributeTable dim id atts =
         createAlea "Document"
@@ -230,12 +264,14 @@ module Prueba =
                 <==(createAlea "AttributeTable"
                     <-- attributeId id)))
 
-    // let dimensionImportAttributeValues dim id (elementsList : seq<Element * seq<Field * string>>) =
-    //     let tbl = createAlea "AttributeTable"
-    //     createAlea "Document"
-    //         <==(aleaRequest "Dimension" "ImportAttributeValues"
-    //             <==(dimensionNameWithHierarchies dim
-    //             ))
+    let dimensionImportAttributeValues dim id atts values =
+        createAlea "Document"
+        <==(aleaRequest "Dimension" "ImportAttributeValues"
+            <==(dimensionNameWithHierarchies dim
+                <==(importAttributeValuesMethod dim id atts values)))
+
+
+
 
     type ErrorRequest = 
         | HttpError     of string
@@ -269,13 +305,7 @@ module Prueba =
             |> Seq.toArray
             |> Result.sequenceSeq)
 
-    // [ execute (dimensionDelete "prueba") 
-    //   execute (dimensionCreate "prueba" "prueba description" ["N\tMyElement1"; "N\tMyElement2"; "S\tMyElement3"; "C\tMyElement4\n\tMyElement5"])
-    //   ]
-    // |> session 
-    // |> printfn "%A"
-
-    let prueba2 = Dimension "prueba2"
+    let DimPrueba = Dimension "DimPrueba"
     let elements = [ 
                      Element "MyElement1" , ElemType.String
                      Element "MyElement2" , ElemType.Numeric
@@ -364,13 +394,23 @@ module Prueba =
         }
     ]
 
-    [ execute (dimensionDelete prueba2)
-      execute (dimensionCreate prueba2 "prueba2 description" elements relations )
-      execute (dimensionCreateAttributeTable prueba2 TableId1 attributes )
-      execute (dimensionCreateAttributeTable prueba2 TableId2 attributes )
-      execute (dimensionCreateAttributeTable prueba2 TableId3 attributes )
-    //   execute (dimensionDeleteAttributeTable prueba2 TableId3 )
-      ]
-    |> session 
-    |> printfn "%A"
+    let values = [
+                    ("MyElement1", "string1", 123, LogicalType.True)
+                    ("MyElement2", "string2", 456, LogicalType.True)
+                    ("MyElement3", "string3", 789, LogicalType.False)
+                    // (None, None,     LogicalType.False)
+                ]
+
+    // [ execute (dimensionDelete DimPrueba)
+    //   execute (dimensionCreate DimPrueba "DimPrueba description" elements relations )
+    //   execute (dimensionCreateAttributeTable DimPrueba TableId1 attributes )
+    //   execute (dimensionCreateAttributeTable DimPrueba TableId2 attributes )
+    //   execute (dimensionCreateAttributeTable DimPrueba TableId3 attributes )
+    // //   execute (dimensionDeleteAttributeTable DimPrueba TableId3 )
+    //   ]
+    // |> session 
+    // |> printfn "%A"
+
+    execute (dimensionImportAttributeValues DimPrueba TableId1 attributes values)
+    |> outerXml |> print
 
